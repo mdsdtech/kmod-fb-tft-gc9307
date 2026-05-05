@@ -353,6 +353,41 @@ static int set_gamma(struct fbtft_par *par, u32 *curves)
 	return 0;
 }
 
+static void gc9307_update_display(struct fbtft_par *par, unsigned int start_line, unsigned int end_line)
+{
+    size_t offset, len;
+
+    if (unlikely(!(par->fbtftops.write_vmem)))
+        return;
+
+    /* 
+     * LVGL / Defio Quirk Fix:
+     * start_line and end_line get inverted during specific memory flushes.
+     * Instead of spamming the kernel log with a warning, we silently fix 
+     * the inverted lines and execute a standard full display update.
+     */
+    if (start_line > end_line) {
+        start_line = 0;
+        end_line = par->info->var.yres - 1;
+    }
+
+    /* Standard bounds checking */
+    if (start_line >= par->info->var.yres)
+        start_line = par->info->var.yres - 1;
+    if (end_line >= par->info->var.yres)
+        end_line = par->info->var.yres - 1;
+
+    /* Set the address window on the GC9307 controller */
+    par->fbtftops.set_addr_win(par, 0, start_line, par->info->var.xres - 1, end_line);
+
+    /* Calculate memory offsets */
+    offset = start_line * par->info->fix.line_length;
+    len = (end_line - start_line + 1) * par->info->fix.line_length;
+
+    /* Write video memory to display */
+    par->fbtftops.write_vmem(par, offset, len);
+}
+
 /**
  * blank() - blank the display
  *
@@ -383,6 +418,8 @@ static struct fbtft_display display = {
 		.set_var = set_var,
 		.set_gamma = set_gamma,
 		.blank = blank,
+		/* Add our custom override here: */
+        .update_display = gc9307_update_display,
 	},
 };
 
